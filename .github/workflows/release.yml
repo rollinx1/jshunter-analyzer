@@ -123,30 +123,6 @@ jobs:
         generate_release_notes: false
         prerelease: false
         make_latest: true
-        body: |
-          ## 🚀 JSHunter Analyzer - Latest Build
-                    
-          ### 📥 Download:
-          - **Linux x64**: `analyzer-linux-x64`
-          - **Linux ARM64**: `analyzer-linux-arm64`  
-          - **Windows x64**: `analyzer-windows-x64.exe`
-          - **macOS Intel**: `analyzer-darwin-x64`
-          - **macOS Apple Silicon**: `analyzer-darwin-arm64`
-          
-          ### 🔧 Usage:
-          ```bash
-          # Linux/macOS:
-          chmod +x analyzer-linux-x64
-          ./analyzer-linux-x64 /path/to/file.js
-          
-          # Windows:
-          analyzer-windows-x64.exe /path/to/file.js
-          ```
-          
-          ### 🔐 Verification:
-          Check `checksums.txt` for SHA256 hashes.
-          
-          ### 📅 Built: 
-          ${{ github.event.head_commit.timestamp }} from commit [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+  
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
