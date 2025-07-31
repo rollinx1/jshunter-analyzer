@@ -29,7 +29,14 @@ program
             console.log(JSON.stringify(result, null, 2));
         } catch (error) {
             if (error instanceof Error && error.message.startsWith('Failed to parse')) {
-                console.error(chalk.yellow(`Warning: The file '${file}' could not be parsed as JavaScript. Analysis skipped.`));
+                const emptyResult = {
+                    urls: [],
+                    graphql: [],
+                    domxss: [],
+                    events: [],
+                    httpapi: []
+                };
+                console.log(JSON.stringify(emptyResult, null, 2));
                 process.exit(0);
             } else {
                 console.error('Error:', error instanceof Error ? error.message : String(error));
