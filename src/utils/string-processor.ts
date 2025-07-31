@@ -5,10 +5,10 @@ export function processTemplateLiteral(template: string): string {
     return template.replace(/\$\{[^}]*\}/g, 'EXPR');
 }
 
-export function processStringConcatenation(node: Node): string {
+export function processStringConcatenation(node: Node, variableMap: Map<string, string>): string {
     if (node.type === 'BinaryExpression' && node.operator === '+') {
-        const left = processStringConcatenation(node.left);
-        const right = processStringConcatenation(node.right);
+        const left = processStringConcatenation(node.left, variableMap);
+        const right = processStringConcatenation(node.right, variableMap);
         return left + right;
     }
 
@@ -17,10 +17,11 @@ export function processStringConcatenation(node: Node): string {
         node.callee.property.type === 'Identifier' &&
         node.callee.property.name === 'concat') {
 
-        const base = processStringConcatenation(node.callee.object);
+        const base = processStringConcatenation(node.callee.object, variableMap);
         const args = node.arguments
             .map(arg => arg.type === 'Literal' && typeof arg.value === 'string'
                 ? arg.value
+                : (arg.type === 'Identifier' && variableMap.has(arg.name)) ? variableMap.get(arg.name)!
                 : 'EXPR')
             .join('');
         return base + args;
@@ -30,10 +31,14 @@ export function processStringConcatenation(node: Node): string {
         return node.value;
     }
 
+    if (node.type === 'Identifier' && variableMap.has(node.name)) {
+        return variableMap.get(node.name)!;
+    }
+
     return 'EXPR';
 }
 
-export function extractStringFromNode(node: Node): string | null {
+export function extractStringFromNode(node: Node, variableMap: Map<string, string>): string | null {
     if (node.type === 'Literal' && typeof node.value === 'string') {
         return node.value;
     }
@@ -44,14 +49,21 @@ export function extractStringFromNode(node: Node): string | null {
         for (let i = 0; i < node.quasis.length; i++) {
             result += node.quasis[i].value.raw;
             if (i < node.expressions.length) {
-                result += 'EXPR'; // Placeholder for expressions
+                const expr = node.expressions[i];
+                if (expr.type === 'Identifier' && variableMap.has(expr.name)) {
+                    result += variableMap.get(expr.name)!;
+                } else if (expr.type === 'Literal' && typeof expr.value === 'string') {
+                    result += expr.value;
+                } else {
+                    result += 'EXPR'; // Placeholder for unresolved expressions
+                }
             }
         }
         return result;
     }
 
     if (node.type === 'BinaryExpression' && node.operator === '+') {
-        return processStringConcatenation(node);
+        return processStringConcatenation(node, variableMap);
     }
 
     return null;

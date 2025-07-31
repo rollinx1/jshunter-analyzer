@@ -19,7 +19,7 @@ export class UrlAnalyzer {
             includeFileExtensions: config.includeFileExtensions ?? true,
             excludeCommonWords: config.excludeCommonWords ?? true,
             confidenceThreshold: config.confidenceThreshold ?? 0.5,
-            enableVariableTracking: config.enableVariableTracking ?? false,
+            enableVariableTracking: config.enableVariableTracking ?? true,
             enableObjectPropertyAnalysis: config.enableObjectPropertyAnalysis ?? false,
             enableDeepTraversal: config.enableDeepTraversal ?? false,
             maxTraversalDepth: config.maxTraversalDepth ?? 10,
@@ -113,7 +113,7 @@ export class UrlAnalyzer {
         }
 
         // Try to extract string from concatenation
-        const extractedString = extractStringFromNode(node);
+        const extractedString = extractStringFromNode(node, this.variableMap);
         if (!extractedString) {
             return;
         }
@@ -158,7 +158,7 @@ export class UrlAnalyzer {
             const urlArg = node.arguments[0];
 
             if (isStringLikeNode(urlArg)) {
-                const extractedString = extractStringFromNode(urlArg);
+                const extractedString = extractStringFromNode(urlArg, this.variableMap);
                 if (extractedString) {
                     const value = normalizeUrl(extractedString);
 
@@ -178,7 +178,7 @@ export class UrlAnalyzer {
     }
 
     private handleStringConcatNode(node: any, source: string, results: UrlMatch[]): void {
-        const extractedString = extractStringFromNode(node);
+        const extractedString = extractStringFromNode(node, this.variableMap);
         if (!extractedString) {
             return;
         }
@@ -199,15 +199,30 @@ export class UrlAnalyzer {
     private handleVariableDeclaratorNode(node: any, source: string, results: UrlMatch[]): void {
         if (node.id?.type === 'Identifier' && node.init) {
             const variableName = node.id.name;
-            const value = extractStringFromNode(node.init);
+            const value = extractStringFromNode(node.init, this.variableMap);
 
             if (value) {
                 // Store variable assignment for later reference
                 this.variableMap.set(variableName, value);
 
+                // If the value is dynamic, try to remove previous partial matches
+                if (node.init.type === 'TemplateLiteral' || node.init.type === 'BinaryExpression') {
+                    for (let i = results.length - 1; i >= 0; i--) {
+                        if (value.includes(results[i].value)) {
+                            results.splice(i, 1);
+                        }
+                    }
+                }
+
                 // Check if the assigned value is a URL
                 if (isValidUrl(value)) {
-                    const { type, metadata } = analyzeUrl(value);
+                    let { type, metadata } = analyzeUrl(value);
+
+                    // If the URL was constructed dynamically, ensure the type reflects that.
+                    if (node.init.type === 'TemplateLiteral' || node.init.type === 'BinaryExpression') {
+                        type = 'dynamic-url';
+                    }
+
                     if (metadata.confidence >= this.config.confidenceThreshold) {
                         results.push(this.createUrlMatch(node.init, source, value, value, type, metadata));
                     }
@@ -237,7 +252,7 @@ export class UrlAnalyzer {
             ];
 
             if (urlProperties.includes(propertyName)) {
-                const value = extractStringFromNode(node.value);
+                const value = extractStringFromNode(node.value, this.variableMap);
                 if (value && isValidUrl(value)) {
                     const { type, metadata } = analyzeUrl(value);
                     // Bonus confidence for URL properties

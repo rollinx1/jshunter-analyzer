@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import { Analyzer } from './analyzer';
 import { AnalyzerConfig } from './types';
+import chalk from 'chalk';
 
 const program = new Command();
 
@@ -15,22 +16,25 @@ program
     .argument('<file>', 'JavaScript file to analyze')
     .option('-c, --confidence <threshold>', 'Confidence threshold (0-1)', '0.3')
     .option('-d, --depth <max>', 'Maximum traversal depth', '10')
-    .action(async (file: string, options) => {
+    .action((file: string, options) => {
         try {
             const config: AnalyzerConfig = {
                 confidenceThreshold: parseFloat(options.confidence),
                 maxTraversalDepth: parseInt(options.depth)
             };
 
-            // Use the new optimized analyzer - single read, parse, and traversal
             const analyzer = new Analyzer(config);
             const result = analyzer.analyze(file);
 
-            // Output combined results as JSON
             console.log(JSON.stringify(result, null, 2));
         } catch (error) {
-            console.error('Error:', error instanceof Error ? error.message : String(error));
-            process.exit(1);
+            if (error instanceof Error && error.message.startsWith('Failed to parse')) {
+                console.error(chalk.yellow(`Warning: The file '${file}' could not be parsed as JavaScript. Analysis skipped.`));
+                process.exit(0);
+            } else {
+                console.error('Error:', error instanceof Error ? error.message : String(error));
+                process.exit(1);
+            }
         }
     });
 
