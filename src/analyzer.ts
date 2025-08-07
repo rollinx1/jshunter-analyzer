@@ -15,6 +15,7 @@ import { GraphQLAnalyzer } from './analyzers/gql-analyzer';
 import { DOMXSSAnalyzer } from './analyzers/dom-xss-analyzer';
 import { UrlAnalyzer } from './analyzers/url-analyzer';
 import { EventHandlersAnalyzer } from './analyzers/event-handlers-analyzer';
+import { traverse } from './utils/walker.js';
 
 export class Analyzer {
     private config: AnalyzerConfig;
@@ -62,50 +63,16 @@ export class Analyzer {
             httpapi: []
         };
 
-        // Single traversal with all analyzers running together
-        if (ast) {
-            this.traverseNode(ast, source, filePath, results, 0);
-        }
+        traverse(ast, {
+            enter: (node: any) => {
+                this.httpApiAnalyzer.analyzeNode(node, source, results.httpapi);
+                this.graphqlAnalyzer.analyzeNode(node, source, results.graphql);
+                this.domxssAnalyzer.analyzeNode(node, source, results.domxss);
+                this.urlAnalyzer.analyzeNode(node, source, results.urls);
+                this.eventHandlersAnalyzer.analyzeNode(node, source, results.events);
+            }
+        });
 
         return results;
-    }
-
-    private traverseNode(node: any, source: string, filePath: string, results: AnalyzerResult, depth: number): void {
-        if (!node || depth > (this.config.maxTraversalDepth || 200)) {
-            return;
-        }
-
-        // Run ALL analyzers on current node
-        this.httpApiAnalyzer.analyzeNode(node, source, results.httpapi);
-        this.graphqlAnalyzer.analyzeNode(node, source, results.graphql);
-        this.domxssAnalyzer.analyzeNode(node, source, results.domxss);
-        this.urlAnalyzer.analyzeNode(node, source, results.urls);
-        this.eventHandlersAnalyzer.analyzeNode(node, source, results.events);
-
-        // Continue traversal
-        if (Array.isArray(node)) {
-            node.forEach(child => this.traverseNode(child, source, filePath, results, depth + 1));
-        } else if (typeof node === 'object') {
-            const childKeys = Object.keys(node).filter(key =>
-                key !== 'parent' &&
-                key !== 'leadingComments' &&
-                key !== 'trailingComments' &&
-                key !== 'type' &&
-                key !== 'start' &&
-                key !== 'end'
-            );
-            childKeys.forEach(key => {
-                const child = node[key];
-                if (Array.isArray(child)) {
-                    child.forEach(item => {
-                        if (item && typeof item === 'object') {
-                            this.traverseNode(item, source, filePath, results, depth + 1);
-                        }
-                    });
-                } else if (child && typeof child === 'object') {
-                    this.traverseNode(child, source, filePath, results, depth + 1);
-                }
-            });
-        }
     }
 } 

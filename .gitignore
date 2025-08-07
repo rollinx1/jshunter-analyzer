@@ -10,3 +10,4 @@ out/
 *.bin
 
 tests/
+analyzer*

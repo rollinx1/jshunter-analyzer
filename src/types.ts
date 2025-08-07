@@ -12,26 +12,15 @@ export interface UrlMatch {
 }
 
 export type UrlType =
-    | 'full-url'      // https://api.example.com/v1/users
-    | 'path-only'     // /api/v1/users
-    | 'relative-path' // ./assets/image.png
-    | 'api-endpoint'  // api/users or /api/users
-    | 'file-path'     // /static/js/main.js
-    | 'template-url'  // `https://api.${domain}/users`
-    | 'dynamic-url';  // baseUrl + "/users"
+    | 'api-endpoint'
+    | 'url'
+    | 'path'
+    | 'file';
 
 export interface UrlMetadata {
-    hostname?: string;
-    port?: string;
-    pathname?: string;
-    queryParams?: string;
-    hash?: string;
-    extension?: string;
+    confidence: number;
     isApi?: boolean;
-    isSecure?: boolean;
-    hasParams?: boolean;
-    hasFragment?: boolean;
-    confidence: number; // 0-1 score of how confident we are this is a URL
+    fileExtension?: string;
 }
 
 export interface GraphQLMatch {

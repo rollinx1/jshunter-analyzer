@@ -1,5 +1,6 @@
 import { AnalyzerConfig, UrlMatch, UrlType } from "../types.js";
-import { isValidUrl, analyzeUrl, shouldExcludeUrl } from "../utils/url-validator.js";
+import { isValidPath } from "../utils/path-validator.js";
+import { classifyUrl } from "../utils/url-classifier.js";
 import {
     extractStringFromNode,
     isStringLikeNode,
@@ -60,6 +61,27 @@ export class UrlAnalyzer {
                     this.handlePropertyNode(node, source, results);
                 }
                 break;
+            case 'AssignmentExpression':
+                this.handleAssignmentExpressionNode(node, source, results);
+                break;
+        }
+    }
+
+    private handleAssignmentExpressionNode(node: any, source: string, results: UrlMatch[]): void {
+        if (node.left?.type === 'MemberExpression') {
+            const propertyName = node.left.property?.name;
+
+            const urlProperties = [
+                'href', 'src', 'location'
+            ];
+
+            if (urlProperties.includes(propertyName)) {
+                const value = extractStringFromNode(node.right, this.variableMap);
+                if (value && isValidPath(value)) {
+                    const type = classifyUrl(value, 'assignment-url');
+                    results.push(this.createUrlMatch(node.right, source, value, value, type, {}));
+                }
+            }
         }
     }
 
@@ -70,15 +92,12 @@ export class UrlAnalyzer {
 
         const value = normalizeUrl(node.value);
 
-        if (shouldExcludeUrl(value) || !isValidUrl(value)) {
+        if (!isValidPath(value)) {
             return;
         }
 
-        const { type, metadata } = analyzeUrl(value);
-
-        if (metadata.confidence >= this.config.confidenceThreshold) {
-            results.push(this.createUrlMatch(node, source, value, value, type, metadata));
-        }
+        const type = classifyUrl(value, 'literal-url');
+        results.push(this.createUrlMatch(node, source, value, value, type, {}));
     }
 
     private handleTemplateLiteralNode(node: any, source: string, results: UrlMatch[]): void {
@@ -93,18 +112,12 @@ export class UrlAnalyzer {
         // Process template expressions
         const processedValue = cleanValue.replace(/\$\{[^}]*\}/g, 'EXPR');
 
-        if (shouldExcludeUrl(processedValue) || !isValidUrl(processedValue)) {
+        if (!isValidPath(processedValue)) {
             return;
         }
 
-        const { type, metadata } = analyzeUrl(processedValue);
-
-        // Template literals are likely to be dynamic URLs
-        const adjustedType: UrlType = type === 'dynamic-url' ? 'template-url' : type;
-
-        if (metadata.confidence >= this.config.confidenceThreshold) {
-            results.push(this.createUrlMatch(node, source, rawValue, processedValue, adjustedType, metadata));
-        }
+        const type = classifyUrl(processedValue, 'template-url');
+        results.push(this.createUrlMatch(node, source, rawValue, processedValue, type, {}));
     }
 
     private handleBinaryExpressionNode(node: any, source: string, results: UrlMatch[]): void {
@@ -120,18 +133,12 @@ export class UrlAnalyzer {
 
         const value = normalizeUrl(extractedString);
 
-        if (shouldExcludeUrl(value) || !isValidUrl(value)) {
+        if (!isValidPath(value)) {
             return;
         }
 
-        const { type, metadata } = analyzeUrl(value);
-
-        // String concatenation usually indicates dynamic URLs
-        const adjustedType: UrlType = type === 'dynamic-url' ? 'dynamic-url' : type;
-
-        if (metadata.confidence >= this.config.confidenceThreshold) {
-            results.push(this.createUrlMatch(node, source, extractedString, value, adjustedType, metadata));
-        }
+        const type = classifyUrl(value, 'dynamic-url');
+        results.push(this.createUrlMatch(node, source, extractedString, value, type, {}));
     }
 
     private handleCallExpressionNode(node: any, source: string, results: UrlMatch[]): void {
@@ -140,15 +147,34 @@ export class UrlAnalyzer {
             const functionName = node.callee.name;
 
             // Check for common HTTP methods and URL-related functions
-            if (['fetch', 'axios', 'request', 'get', 'post', 'put', 'delete', 'patch'].includes(functionName)) {
+            if (['fetch', 'axios', 'request', 'get', 'post', 'put', 'delete', 'patch', 'open'].includes(functionName)) {
                 this.handleHttpCallNode(node, source, results);
             }
         }
 
         // Handle method calls like string.concat()
-        if (node.callee?.type === 'MemberExpression' &&
-            node.callee.property?.name === 'concat') {
-            this.handleStringConcatNode(node, source, results);
+        if (node.callee?.type === 'MemberExpression') {
+            const propertyName = node.callee.property?.name;
+            if (propertyName === 'concat') {
+                this.handleStringConcatNode(node, source, results);
+            }
+            if (propertyName === 'replace' && node.callee.object?.property?.name === 'location') {
+                this.handleHttpCallNode(node, source, results);
+            }
+        }
+
+        this.handleGenericCallNode(node, source, results);
+    }
+
+    private handleGenericCallNode(node: any, source: string, results: UrlMatch[]): void {
+        if (node.arguments) {
+            for (const arg of node.arguments) {
+                const value = extractStringFromNode(arg, this.variableMap);
+                if (value && isValidPath(value)) {
+                    const type = classifyUrl(value, 'generic-call-url');
+                    results.push(this.createUrlMatch(arg, source, value, value, type, {}));
+                }
+            }
         }
     }
 
@@ -157,21 +183,13 @@ export class UrlAnalyzer {
         if (node.arguments && node.arguments.length > 0) {
             const urlArg = node.arguments[0];
 
-            if (isStringLikeNode(urlArg)) {
-                const extractedString = extractStringFromNode(urlArg, this.variableMap);
-                if (extractedString) {
-                    const value = normalizeUrl(extractedString);
+            const extractedString = extractStringFromNode(urlArg, this.variableMap);
+            if (extractedString) {
+                const value = normalizeUrl(extractedString);
 
-                    if (!shouldExcludeUrl(value) && isValidUrl(value)) {
-                        const { type, metadata } = analyzeUrl(value);
-
-                        // HTTP calls are likely to be API endpoints
-                        const adjustedMetadata = { ...metadata, isApi: true, confidence: metadata.confidence + 0.1 };
-
-                        if (adjustedMetadata.confidence >= this.config.confidenceThreshold) {
-                            results.push(this.createUrlMatch(urlArg, source, extractedString, value, type, adjustedMetadata));
-                        }
-                    }
+                if (isValidPath(value)) {
+                    const type = classifyUrl(value, 'api-url');
+                    results.push(this.createUrlMatch(urlArg, source, extractedString, value, type, { isApi: true }));
                 }
             }
         }
@@ -185,15 +203,12 @@ export class UrlAnalyzer {
 
         const value = normalizeUrl(extractedString);
 
-        if (shouldExcludeUrl(value) || !isValidUrl(value)) {
+        if (!isValidPath(value)) {
             return;
         }
 
-        const { type, metadata } = analyzeUrl(value);
-
-        if (metadata.confidence >= this.config.confidenceThreshold) {
-            results.push(this.createUrlMatch(node, source, extractedString, value, 'dynamic-url', metadata));
-        }
+        const type = classifyUrl(value, 'dynamic-url');
+        results.push(this.createUrlMatch(node, source, extractedString, value, type, {}));
     }
 
     private handleVariableDeclaratorNode(node: any, source: string, results: UrlMatch[]): void {
@@ -215,17 +230,9 @@ export class UrlAnalyzer {
                 }
 
                 // Check if the assigned value is a URL
-                if (isValidUrl(value)) {
-                    let { type, metadata } = analyzeUrl(value);
-
-                    // If the URL was constructed dynamically, ensure the type reflects that.
-                    if (node.init.type === 'TemplateLiteral' || node.init.type === 'BinaryExpression') {
-                        type = 'dynamic-url';
-                    }
-
-                    if (metadata.confidence >= this.config.confidenceThreshold) {
-                        results.push(this.createUrlMatch(node.init, source, value, value, type, metadata));
-                    }
+                if (isValidPath(value)) {
+                    const type = classifyUrl(value, 'variable-url');
+                    results.push(this.createUrlMatch(node.init, source, value, value, type, {}));
                 }
             }
         }
@@ -253,14 +260,9 @@ export class UrlAnalyzer {
 
             if (urlProperties.includes(propertyName)) {
                 const value = extractStringFromNode(node.value, this.variableMap);
-                if (value && isValidUrl(value)) {
-                    const { type, metadata } = analyzeUrl(value);
-                    // Bonus confidence for URL properties
-                    metadata.confidence += 0.1;
-
-                    if (metadata.confidence >= this.config.confidenceThreshold) {
-                        results.push(this.createUrlMatch(node.value, source, value, value, type, metadata));
-                    }
+                if (value && isValidPath(value)) {
+                    const type = classifyUrl(value, 'property-url');
+                    results.push(this.createUrlMatch(node.value, source, value, value, type, {}));
                 }
             }
         }
